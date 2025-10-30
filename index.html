@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Descarga masiva de gatos (The Cat API)</title>
+  <style>
+    body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial; padding: 18px; }
+    .log { white-space: pre-wrap; background:#f7f7f7; border:1px solid #eee; padding:10px; max-height:300px; overflow:auto; }
+    label,input { margin-right:8px; }
+  </style>
+</head>
+<body>
+  <h1>Descarga masiva de fotos de gatos</h1>
+  <p>
+    Esta página pide imágenes a <strong>The Cat API</strong> y fuerza la descarga de cada imagen.
+  </p>
+
+  <div>
+    <label>Cantidad (max recommended 50): <input id="count" type="number" min="1" max="200" value="10" /></label>
+    <label>Delay entre descargas (ms): <input id="delay" type="number" min="0" value="300" /></label>
+    <label>API Key (opcional): <input id="apikey" type="text" placeholder="x-api-key (opcional)"/></label>
+    <button id="start">Iniciar descarga</button>
+    <button id="stop">Detener</button>
+  </div>
+
+  <p>También puedes abrir esta página con parámetros en la URL: <code>?count=20&apikey=TU_KEY&delay=200</code></p>
+
+  <h3>Registro</h3>
+  <div id="log" class="log"></div>
+
+<script>
+(async function () {
+  const logEl = document.getElementById('log');
+  function log(...args){ logEl.textContent += args.join(' ') + '\\n'; logEl.scrollTop = logEl.scrollHeight; }
+
+  const getParam = (name, fallback) => {
+    const u = new URL(window.location.href);
+    return u.searchParams.get(name) ?? fallback;
+  };
+
+  const countInput = document.getElementById('count');
+  const delayInput = document.getElementById('delay');
+  const apikeyInput = document.getElementById('apikey');
+  const startBtn = document.getElementById('start');
+  const stopBtn = document.getElementById('stop');
+
+  // inicializar desde query params si vienen
+  const qCount = parseInt(getParam('count', ''), 10);
+  const qDelay = parseInt(getParam('delay', ''), 10);
+  const qKey = getParam('apikey', '');
+  if (!Number.isNaN(qCount)) countInput.value = qCount;
+  if (!Number.isNaN(qDelay)) delayInput.value = qDelay;
+  if (qKey) apikeyInput.value = qKey;
+
+  let stopRequested = false;
+  stopBtn.addEventListener('click', () => { stopRequested = true; log('Detención solicitada.'); });
+
+  async function fetchJson(url, headers = {}) {
+    const res = await fetch(url, { headers });
+    if (!res.ok) throw new Error(`HTTP ${res.status} - ${res.statusText}`);
+    return res.json();
+  }
+
+  // descarga un blob y fuerza la descarga
+  async function downloadFromUrl(url, filename) {
+    // fetch como blob para evitar problemas de CORS y obtener datos
+    const r = await fetch(url, { mode: 'cors' });
+    if (!r.ok) throw new Error(`Imagen HTTP ${r.status}`);
+    const blob = await r.blob();
+    const blobUrl = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = blobUrl;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    // liberar objeto URL
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 10000);
+  }
+
+  async function startDownloads() {
+    stopRequested = false;
+    const count = Math.max(1, Math.min(200, parseInt(countInput.value) || 10));
+    const delayMs = Math.max(0, parseInt(delayInput.value) || 300);
+    const apiKey = apikeyInput.value.trim();
+
+    log(`Iniciando descarga de ${count} imágenes (delay ${delayMs} ms).`);
+    const batchSize = Math.min(50, count); // pedir hasta 50 por llamada al endpoint
+    let remaining = count;
+    let page = 0;
+    let fileIndex = 1;
+
+    while (remaining > 0 && !stopRequested) {
+      const thisBatch = Math.min(batchSize, remaining);
+      const url = new URL('https://api.thecatapi.com/v1/images/search');
+      url.searchParams.set('limit', String(thisBatch));
+      url.searchParams.set('page', String(page));
+      url.searchParams.set('order', 'RANDOM'); // aleatorio por defecto
+
+      log(`Solicitando ${thisBatch} imágenes al endpoint... (page ${page})`);
+      const headers = {};
+      if (apiKey) headers['x-api-key'] = apiKey;
+
+      let results;
+      try {
+        results = await fetchJson(url.toString(), headers);
+      } catch (err) {
+        log('Error al solicitar imágenes:', err.message);
+        break;
+      }
+
+      // results es un array con objetos { id, url, width, height, ... }
+      for (const item of results) {
+        if (stopRequested) break;
+        const imageUrl = item.url;
+        const extMatch = imageUrl.match(/\\.([a-zA-Z0-9]{3,4})(?:\\?|$)/);
+        const ext = extMatch ? extMatch[1] : 'jpg';
+        const fname = `cat_${fileIndex.toString().padStart(4,'0')}.${ext}`;
+        try {
+          log(`Descargando ${fileIndex}/${count}: ${imageUrl}`);
+          await downloadFromUrl(imageUrl, fname);
+        } catch (err) {
+          log(`  Error descargando ${imageUrl}: ${err.message}`);
+        }
+        fileIndex++;
+        // espera pequeña para evitar disparar rate limits y dar tiempo al navegador
+        await new Promise(r => setTimeout(r, delayMs));
+      }
+
+      remaining -= thisBatch;
+      page++;
+      // Si la API no devuelve resultados (vacío), salir para evitar bucle infinito
+      if (!results || results.length === 0) {
+        log('La API devolvió 0 resultados. Terminando.');
+        break;
+      }
+    }
+
+    log('Proceso terminado.');
+  }
+
+  startBtn.addEventListener('click', () => startDownloads().catch(e => log('Error:', e.message)));
+
+  // auto-start si hay parámetros en la URL ?autostart=1
+  if (getParam('autostart', '') === '1') {
+    startBtn.click();
+  }
+
+})();
+</script>
+</body>
+</html>
