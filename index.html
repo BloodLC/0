@@ -1,47 +1,89 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-  <meta charset="UTF-8">
-  <title> </title> <!-- título invisible -->
+  <meta charset="utf-8" />
+  <title>Simulador local de descargas múltiples</title>
   <style>
-    html, body {
-      height: 100%;
-      margin: 0;
-      background-color: #000; /* fondo negro */
-      overflow: hidden;
-    }
+    body { font-family: Arial, sans-serif; padding: 20px; }
+    label, input, button { display:block; margin: 8px 0; }
   </style>
-  <script>
-    window.onload = async () => {
-      const apiUrl = "https://api.thecatapi.com/v1/images/search?limit=5"; // número de fotos
-      try {
-        const res = await fetch(apiUrl);
-        const cats = await res.json();
-
-        // Descarga cada imagen una tras otra
-        for (let i = 0; i < cats.length; i++) {
-          const url = cats[i].url;
-          const a = document.createElement("a");
-          a.href = url;
-          a.download = "cat_" + (i + 1) + ".jpg";
-          a.style.display = "none";
-          document.body.appendChild(a);
-          a.click();
-          a.remove();
-          await new Promise(r => setTimeout(r, 500)); // medio segundo entre descargas
-        }
-      } catch (err) {
-        console.error("Error al descargar gatos:", err);
-      }
-
-      // Espera 3 segundos y cierra la pestaña
-      setTimeout(() => {
-        window.open('', '_self', '');
-        window.close();
-      }, 3000);
-    };
-  </script>
 </head>
 <body>
+  <h2>Simulador local de descargas múltiples (NO toca la red)</h2>
+  <label>
+    Veces a descargar:
+    <input id="count" type="number" value="10" min="1" max="1000" />
+  </label>
+  <label>
+    Intervalo entre descargas (ms):
+    <input id="interval" type="number" value="200" min="0" />
+  </label>
+  <label>
+    Nombre base del archivo:
+    <input id="basename" type="text" value="testfile" />
+  </label>
+  <button id="start">Iniciar descargas</button>
+  <button id="stop">Detener</button>
+  <div id="log" style="margin-top:12px; white-space:pre-wrap;"></div>
+
+  <script>
+    let timer = null;
+    const startBtn = document.getElementById('start');
+    const stopBtn = document.getElementById('stop');
+    const log = document.getElementById('log');
+
+    function appendLog(msg) {
+      log.textContent += msg + "\\n";
+      log.scrollTop = log.scrollHeight;
+    }
+
+    function createAndDownloadBlob(filename, content) {
+      const blob = new Blob([content], { type: 'text/plain' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      // liberar URL para evitar fugas de memoria
+      URL.revokeObjectURL(url);
+    }
+
+    startBtn.addEventListener('click', () => {
+      const count = Math.max(1, Number(document.getElementById('count').value) || 1);
+      const interval = Math.max(0, Number(document.getElementById('interval').value) || 0);
+      const basename = (document.getElementById('basename').value || 'file').replace(/[^a-z0-9_.-]/gi, '_');
+
+      let i = 0;
+      appendLog(`Iniciando ${count} descargas locales con intervalo ${interval} ms...`);
+      timer = setInterval(() => {
+        i++;
+        const name = `${basename}_${i}.txt`;
+        const content = `Archivo de prueba local #${i}\\nGenerado: ${new Date().toISOString()}`;
+        try {
+          createAndDownloadBlob(name, content);
+          appendLog(`Descarga ${i} generada: ${name}`);
+        } catch (e) {
+          appendLog(`Error en descarga ${i}: ${e}`);
+          clearInterval(timer);
+        }
+        if (i >= count) {
+          appendLog('Proceso completado.');
+          clearInterval(timer);
+        }
+      }, interval);
+    });
+
+    stopBtn.addEventListener('click', () => {
+      if (timer) {
+        clearInterval(timer);
+        timer = null;
+        appendLog('Proceso detenido por el usuario.');
+      } else {
+        appendLog('No hay proceso en ejecución.');
+      }
+    });
+  </script>
 </body>
 </html>
